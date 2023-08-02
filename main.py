@@ -41,7 +41,7 @@ val_data = data[n:]
 def get_data(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
-    ix = np.array(range(0, len(data) - block_size, block_size)) #TODO: is step a good idea ?
+    ix = np.array(range(0, len(data) - block_size)) #TODO: is step a good idea ?
     x = np.stack([data[i:i + block_size] for i in ix])
     y = np.stack([data[i + 1:i + block_size + 1] for i in ix])
     x, y = x, y
@@ -110,5 +110,5 @@ def generate(knn, context, max_new_tokens):
 neigh = KNeighborsClassifier(n_neighbors=7)
 neigh.fit(train_ncd, Y)
 
-context = np.array([0], dtype=np.int64)
-open('more.txt', 'w').write(decode(generate(neigh, context, max_new_tokens=1000)))
+context = np.array(encode("Citiz"), dtype=np.int64)
+open('more.txt', 'w').write(decode(generate(neigh, context, max_new_tokens=200)))

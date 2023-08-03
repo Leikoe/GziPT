@@ -31,7 +31,7 @@ def clearscreen(numlines=100):
 
 
 # Start Ray. This creates some processes that can do work in parallel.
-ray.init()
+ray.init(logging_level="ERROR")
 
 # hyperparameters
 n_ctx = 16  # what is the maximum context length for predictions?
@@ -54,9 +54,7 @@ with open('input.txt', 'r', encoding='utf-8') as f:
 
 # Train and test splits
 data = np.array(tokenizer.encode(text), dtype=np.int64)
-print("training data length:", len(data))
-print(f"n_vocab = {n_vocab}")
-print(f"{n_ctx}")
+
 
 n = int(0.9 * len(data))  # first 90% will be train, rest val
 train_data = data[:n]
@@ -88,8 +86,6 @@ for x, y in list(zip(*get_data("train"))):
         X.append([context.tobytes(), len(gzip.compress(context.tobytes()))])
         Y.append(target)
 
-print("num samples:", len(X))
-
 
 @ray.remote
 def nomnom_fast(bar: tqdm_ray.tqdm, i):
@@ -108,9 +104,9 @@ time.sleep(0.1)
 ray.shutdown()
 
 
-def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int):
-    clearscreen()
-    print(tokenizer.decode(context), end="")
+def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int, streaming=False):
+    if streaming:
+        print(tokenizer.decode(context), end="")
     # idx is (B, T) array of indices in the current context
     for _ in range(max_new_tokens):
         # crop idx to the last block_size tokens
@@ -123,7 +119,8 @@ def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int
         idx_next = np.random.choice(knn.classes_, 1, p=probs[0])  # (B, 1)
         # append sampled index to the running sequence
         context = np.concatenate((context, idx_next))  # (B, T+1)
-        print(tokenizer.decode(idx_next), end=" ")
+        if streaming:
+            print(tokenizer.decode(idx_next), end=" ")
     return context
 
 
@@ -131,7 +128,20 @@ neigh = KNeighborsClassifier(n_neighbors=3)
 neigh.fit(train_ncd, Y)
 # neigh.classes_ = np.arange(n_vocab, dtype=np.int64)
 
+prompt = "Speak"
+context = np.array(tokenizer.encode(prompt), dtype=np.int64)
 
-context = np.array([tokenizer.bos_token_id], dtype=np.int64)
-print(context)
-open('output.txt', 'w').write(tokenizer.decode(generate(neigh, context, max_new_tokens=200)))
+print(f"n_train = {len(data)}")
+print(f"n_vocab = {n_vocab}")
+print(f"n_ctx   = {n_ctx}")
+print()
+print(f"prompt: {prompt}")
+print(f"number of tokens in the prompt = {len(context)}")
+for token in context:
+    print(f"{token:5} -> '{tokenizer.decode(token)}'")
+print()
+print(f"sampling parameters: temp = 0.800000, top_k = 40, top_p = 0.950000")
+print()
+print()
+
+open('output.txt', 'w').write(tokenizer.decode(generate(neigh, context, max_new_tokens=200, streaming=True)))

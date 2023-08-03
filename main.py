@@ -11,34 +11,19 @@ from transformers import LlamaTokenizerFast
 
 tokenizer = LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")
 
-
-def clearscreen(numlines=100):
-    """
-    Clear the console.
-    numlines is an optional argument used only as a fall-back.
-    """
-    # Thanks to Steven D'Aprano, http://www.velocityreviews.com/forums
-
-    if os.name == "posix":
-        # Unix/Linux/MacOS/BSD/etc
-        os.system('clear')
-    elif os.name in ("nt", "dos", "ce"):
-        # DOS/Windows
-        os.system('CLS')
-    else:
-        # Fallback for other operating systems.
-        print('\n' * numlines)
-
-
 # Start Ray. This creates some processes that can do work in parallel.
 ray.init(logging_level="ERROR")
 
 # hyperparameters
-n_ctx = 16  # what is the maximum context length for predictions?
+n_ctx = 32  # what is the maximum context length for predictions?
 n_vocab = tokenizer.vocab_size
 temp = 0.800000
 top_k = 40
 top_p = 0.950000
+
+
+print(f"n_vocab = {n_vocab}")
+print(f"n_ctx   = {n_ctx}")
 
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 with open('input.txt', 'r', encoding='utf-8') as f:
@@ -46,6 +31,8 @@ with open('input.txt', 'r', encoding='utf-8') as f:
 
 # Train and test splits
 data = np.array(tokenizer.encode(text), dtype=np.int64)
+print(f"n_train = {len(data)}")
+print()
 
 n = int(0.9 * len(data))  # first 90% will be train, rest val
 train_data = data[:n]
@@ -136,17 +123,14 @@ def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int
     return context
 
 
-neigh = KNeighborsClassifier(n_neighbors=3)
+neigh = KNeighborsClassifier(n_neighbors=7)
 neigh.fit(train_ncd, Y)
+np.save("model", [train_ncd, Y])
 # neigh.classes_ = np.arange(n_vocab, dtype=np.int64)
 
 prompt = "Speak"
 context = np.array(tokenizer.encode(prompt), dtype=np.int64)
 
-print(f"n_train = {len(data)}")
-print(f"n_vocab = {n_vocab}")
-print(f"n_ctx   = {n_ctx}")
-print()
 print(f"prompt: {prompt}")
 print(f"number of tokens in the prompt = {len(context)}")
 for token in context:

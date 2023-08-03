@@ -34,7 +34,8 @@ def clearscreen(numlines=100):
 ray.init()
 
 # hyperparameters
-context_size = 16  # what is the maximum context length for predictions?
+n_ctx = 16  # what is the maximum context length for predictions?
+n_vocab = tokenizer.vocab_size
 
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 with open('input.txt', 'r', encoding='utf-8') as f:
@@ -54,7 +55,8 @@ with open('input.txt', 'r', encoding='utf-8') as f:
 # Train and test splits
 data = np.array(tokenizer.encode(text), dtype=np.int64)
 print("training data length:", len(data))
-print("vocab size:", tokenizer.vocab_size)
+print(f"n_vocab = {n_vocab}")
+print(f"{n_ctx}")
 
 n = int(0.9 * len(data))  # first 90% will be train, rest val
 train_data = data[:n]
@@ -65,9 +67,9 @@ val_data = data[n:]
 def get_data(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
-    ix = np.array(range(0, len(data) - context_size))  # TODO: is step a good idea ?
-    x = np.stack([data[i:i + context_size] for i in ix])
-    y = np.stack([data[i + 1:i + context_size + 1] for i in ix])
+    ix = np.array(range(0, len(data) - n_ctx))  # TODO: is step a good idea ?
+    x = np.stack([data[i:i + n_ctx] for i in ix])
+    y = np.stack([data[i + 1:i + n_ctx + 1] for i in ix])
     return x, y
 
 
@@ -79,7 +81,7 @@ def ncd_fast(x: bytes, x_compressed: int, x2: bytes, x2_compressed: int):  # NCD
 X = []
 Y = []
 for x, y in list(zip(*get_data("train"))):
-    for token_idx in range(context_size):
+    for token_idx in range(n_ctx):
         context = x[:token_idx + 1]
         target = y[token_idx]
         # print(f"when context is {list(context)}, target is {target}")
@@ -112,14 +114,13 @@ def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int
     # idx is (B, T) array of indices in the current context
     for _ in range(max_new_tokens):
         # crop idx to the last block_size tokens
-        idx_cond = context[-context_size:]
+        idx_cond = context[-n_ctx:]
         idx_cond_compressed = len(gzip.compress(idx_cond.tobytes()))
         # get the predictions
         ncd_scores = np.array([ncd_fast(idx_cond.tobytes(), idx_cond_compressed, *x2) for x2 in X])
-        # probs = knn.predict_proba([ncd_scores])
+        probs: np.ndarray = knn.predict_proba([ncd_scores])
         # sample from the distribution
-        # idx_next = np.random.choice(probs.shape[1], 1, p=probs[0])  # (B, 1)
-        idx_next = knn.predict([ncd_scores])
+        idx_next = np.random.choice(knn.classes_, 1, p=probs[0])  # (B, 1)
         # append sampled index to the running sequence
         context = np.concatenate((context, idx_next))  # (B, T+1)
         print(tokenizer.decode(idx_next), end=" ")
@@ -128,6 +129,8 @@ def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int
 
 neigh = KNeighborsClassifier(n_neighbors=3)
 neigh.fit(train_ncd, Y)
+# neigh.classes_ = np.arange(n_vocab, dtype=np.int64)
+
 
 context = np.array([tokenizer.bos_token_id], dtype=np.int64)
 print(context)

@@ -36,25 +36,16 @@ ray.init(logging_level="ERROR")
 # hyperparameters
 n_ctx = 16  # what is the maximum context length for predictions?
 n_vocab = tokenizer.vocab_size
+temp = 0.800000
+top_k = 40
+top_p = 0.950000
 
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 with open('input.txt', 'r', encoding='utf-8') as f:
-    text = f.read()[:500]
-
-# here are all the unique characters that occur in this text
-# chars = sorted(list(set(text)))
-# vocab_size = len(chars)
-# print("vocab size:", vocab_size)
-
-# create a mapping from characters to integers
-# stoi = {ch: i for i, ch in enumerate(chars)}
-# itos = {i: ch for i, ch in enumerate(chars)}
-# encode = lambda s: [stoi[c] for c in s]  # encoder: take a string, output a list of integers
-# decode = lambda l: ''.join([itos[i] for i in l])  # decoder: take a list of integers, output a string
+    text = f.read()[:5000]
 
 # Train and test splits
 data = np.array(tokenizer.encode(text), dtype=np.int64)
-
 
 n = int(0.9 * len(data))  # first 90% will be train, rest val
 train_data = data[:n]
@@ -104,7 +95,18 @@ time.sleep(0.1)
 ray.shutdown()
 
 
-def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int, streaming=False):
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+
+def inv_softmax(x, C):
+    return np.log(x) + C
+
+
+def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int, streaming=False, temperature=1.0,
+             top_k=None):
     if streaming:
         print(tokenizer.decode(context), end="")
     # idx is (B, T) array of indices in the current context
@@ -112,11 +114,21 @@ def generate(knn: KNeighborsClassifier, context: np.ndarray, max_new_tokens: int
         # crop idx to the last block_size tokens
         idx_cond = context[-n_ctx:]
         idx_cond_compressed = len(gzip.compress(idx_cond.tobytes()))
+
         # get the predictions
         ncd_scores = np.array([ncd_fast(idx_cond.tobytes(), idx_cond_compressed, *x2) for x2 in X])
         probs: np.ndarray = knn.predict_proba([ncd_scores])
+
+        # pluck the logits at the final step and scale by desired temperature
+        probs = inv_softmax(probs + 0.1, 0)
+        probs /= temperature
+        probs = softmax(probs)
         # sample from the distribution
-        idx_next = np.random.choice(knn.classes_, 1, p=probs[0])  # (B, 1)
+        if top_k is not None:
+            topk_idxs = (-probs).argsort()[:top_k]
+            idx_next = np.random.choice(knn.classes_[topk_idxs], 1, p=probs[0][topk_idxs])  # (B, 1)
+        else:
+            idx_next = np.random.choice(knn.classes_, 1, p=probs[0])  # (B, 1)
         # append sampled index to the running sequence
         context = np.concatenate((context, idx_next))  # (B, T+1)
         if streaming:
@@ -140,7 +152,7 @@ print(f"number of tokens in the prompt = {len(context)}")
 for token in context:
     print(f"{token:5} -> '{tokenizer.decode(token)}'")
 print()
-print(f"sampling parameters: temp = 0.800000, top_k = 40, top_p = 0.950000")
+print(f"sampling parameters: temp = {temp:6f}, top_k = {top_k}, top_p = {top_p:6f}")
 print()
 print()
 
